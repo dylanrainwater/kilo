@@ -14,6 +14,11 @@ struct termios orig_termios;
 
 /*** terminal ***/
 void die(const char *s) {
+    // Escape command to clear the whole screen
+    write(STDOUT_FILENO, "\x1b[2J", 4);
+    // Reposition cursor
+    write(STDOUT_FILENO, "\x1b[H", 3);
+
     perror(s);
     exit(1);
 }
@@ -63,12 +68,24 @@ char editorReadKey() {
     return c;
 }
 
+/*** output ***/
+void editorRefreshScreen() {
+    // Escape command to clear the whole screen
+    write(STDOUT_FILENO, "\x1b[2J", 4);
+    // Reposition cursor
+    write(STDOUT_FILENO, "\x1b[H", 3);
+}
+
 /*** input ***/
 void editorProcessKeypresses() {
     char c = editorReadKey();
 
     switch (c) {
         case CTRL_KEY('q'):
+            // Escape command to clear the whole screen
+            write(STDOUT_FILENO, "\x1b[2J", 4);
+            // Reposition cursor
+            write(STDOUT_FILENO, "\x1b[H", 3);
             exit(0);
             break;
         default:
@@ -84,6 +101,7 @@ int main() {
 
     // Input loop
     while (1) {
+        editorRefreshScreen();
         editorProcessKeypresses();
     }
     return 0;
