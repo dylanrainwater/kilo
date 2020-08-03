@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <stdlib.h>
 #include <termios.h>
 #include <unistd.h>
@@ -29,6 +30,11 @@ int main() {
     int size = 0;
     // Get user input
     while (read(STDIN_FILENO, &c, 1) && c != 'q') {
+        if (iscntrl(c)) {
+            printf("%d\n", c);
+        } else {
+            printf("%d ('%c')\n", c, c);
+        }
         size++;
     }
 
