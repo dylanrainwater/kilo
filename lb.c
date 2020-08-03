@@ -3,6 +3,8 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -10,7 +12,13 @@
 #define CTRL_KEY(k) ((k) & 0x1f) // 0x1f = 00011111
 
 /*** data ***/
-struct termios orig_termios;
+struct editorConfig {
+    int screenrows;
+    int screencols;
+    struct termios orig_termios;
+};
+
+struct editorConfig E;
 
 /*** terminal ***/
 void die(const char *s) {
@@ -24,19 +32,19 @@ void die(const char *s) {
 }
 
 void disableRawMode() {
-    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios) == -1) {
+    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios) == -1) {
         die("disableRawMode()::tcsetattr");
     }
 }
 
 void enableRawMode() {
-    if (tcgetattr(STDIN_FILENO, &orig_termios) == -1) {
+    if (tcgetattr(STDIN_FILENO, &E.orig_termios) == -1) {
         die("enableRawMode()::tcgetattr");
     }
 
     atexit(disableRawMode);
 
-    struct termios raw = orig_termios; 
+    struct termios raw = E.orig_termios; 
 
     // Turn off control characters and carriage return / new line
     raw.c_iflag &= ~(IXON | ICRNL | BRKINT | INPCK | ISTRIP);
@@ -68,12 +76,109 @@ char editorReadKey() {
     return c;
 }
 
+int getCursorPosition(int *rows, int *cols) {
+    char buf[32];
+    unsigned int i = 0;
+
+    // Command to ask for cursor position
+    if (write(STDOUT_FILENO, "\x1b[6n", 4) != 4) {
+        return -1;
+    }
+
+    // Read response from request
+    while (i < sizeof(buf) - 1) {
+        if (read(STDIN_FILENO, &buf[i], 1) != 1) {
+            break;
+        }
+
+        if (buf[i] == 'R') {
+            break;
+        }
+
+        i++;
+    }
+    buf[i] = '\0';
+
+    // Check for command sequence
+    if (buf[0] != '\x1b' || buf[1] != '[') {
+        return -1;
+    }
+
+    if (sscanf(&buf[2], "%d;%d", rows, cols) != 2) {
+        return -1;
+    }
+
+    return 0;
+}
+
+int getWindowSize(int *rows, int *cols) {
+    struct winsize ws;
+
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1 || ws.ws_col == 0) {
+        // As fallback if system doesn't support ioctl
+        // Move to bottom right and count how far you moved to get there
+        if (write(STDOUT_FILENO, "\x1b[999C\x1b[999B", 12) != 12) {
+            return -1;
+        }
+        return getCursorPosition(rows, cols);
+    } else {
+        *cols = ws.ws_col;
+        *rows = ws.ws_col;
+        return 0;
+    }
+}
+
+/*** append buffer ***/
+// dynamic, append-only string
+
+struct abuf {
+    char *b;
+    int len;
+};
+
+#define ABUF_INIT {NULL, 0}
+
+void abAppend(struct abuf *ab, const char *s, int len) {
+    char *new = realloc(ab->b, ab->len + len);
+
+    if (new == NULL) {
+        return;
+    }
+
+    memcpy(&new[ab->len], s, len);
+    ab->b = new;
+    ab->len += len;
+}
+
+void abFree(struct abuf *ab) {
+    free(ab->b);
+}
+
 /*** output ***/
+void editorDrawRows(struct abuf *ab) {
+    int y;
+    for (y = 0; y < E.screenrows; y++) {
+        abAppend(ab, "~", 1); 
+        // Don't scroll on last line
+        if (y < E.screenrows - 1) {
+            abAppend(ab, "\r\n", 2);
+        }
+    }
+}
+
 void editorRefreshScreen() {
+    struct abuf ab = ABUF_INIT;
     // Escape command to clear the whole screen
-    write(STDOUT_FILENO, "\x1b[2J", 4);
+    abAppend(&ab, "x1b[2J", 4);
     // Reposition cursor
-    write(STDOUT_FILENO, "\x1b[H", 3);
+    abAppend(&ab, "\x1b[H", 3);
+
+    editorDrawRows(&ab);
+    abAppend(&ab, "\x1b[H", 3);
+
+    write(STDOUT_FILENO, ab.b, ab.len);
+
+    abFree(&ab);
 }
 
 /*** input ***/
@@ -96,8 +201,15 @@ void editorProcessKeypresses() {
 
 
 /*** init ***/
+void initEditor() {
+    if (getWindowSize(&E.screenrows, &E.screencols) == -1) {
+        die("initEditor::getWindowSize");
+    }
+}
+
 int main() {
     enableRawMode();
+    initEditor();
 
     // Input loop
     while (1) {
