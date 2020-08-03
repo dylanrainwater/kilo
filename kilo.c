@@ -24,6 +24,10 @@ void enableRawMode() {
     raw.c_cflag |= (CS8);
     // Turn off echoing, canonical mode, SIGINT/SIGTSTP signals, and implementation-defined input processing
     raw.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN);
+    // Min number of bytes = 0 for timeout
+    raw.c_cc[VMIN] = 0;
+    // Time to wait for timeout in 1/10 of a second
+    raw.c_cc[VTIME] = 1;
 
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 }
@@ -31,19 +35,18 @@ void enableRawMode() {
 int main() {
     enableRawMode();
 
-    char c;
-    int size = 0;
+    // Input loop
+    while (1) {
+        char c = '\0';
+        read(STDIN_FILENO, &c, 1);
 
-    // Get user input
-    while (read(STDIN_FILENO, &c, 1) && c != 'q') {
         if (iscntrl(c)) {
             printf("%d\r\n", c);
         } else {
             printf("%d ('%c')\r\n", c, c);
         }
-        size++;
-    }
 
-    printf("size=%d\n", size);
+        if (c == 'q') break;
+    }
     return 0;
 }
