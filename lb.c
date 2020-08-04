@@ -220,6 +220,23 @@ void editorRefreshScreen() {
 }
 
 /*** input ***/
+void editorMoveCursor(char key) {
+    switch (key) {
+        case 'a':
+            E.cx--;
+            break;
+        case 'd':
+            E.cx++;
+            break;
+        case 'w':
+            E.cy--;
+            break;
+        case 's':
+            E.cy++;
+            break;
+    }
+}
+
 void editorProcessKeypresses() {
     char c = editorReadKey();
 
@@ -231,8 +248,12 @@ void editorProcessKeypresses() {
             write(STDOUT_FILENO, "\x1b[H", 3);
             exit(0);
             break;
-        default:
-            printf("(%d) %c \r\n", c, c);
+
+        case 'w':
+        case 'a':
+        case 's':
+        case 'd':
+            editorMoveCursor(c);
             break;
     }
 }
