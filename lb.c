@@ -9,10 +9,12 @@
 #include <unistd.h>
 
 /*** defines ***/
+#define LB_VERSION "0.0.1"
 #define CTRL_KEY(k) ((k) & 0x1f) // 0x1f = 00011111
 
 /*** data ***/
 struct editorConfig {
+    int cx, cy;
     int screenrows;
     int screencols;
     struct termios orig_termios;
@@ -123,7 +125,11 @@ int getWindowSize(int *rows, int *cols) {
         return getCursorPosition(rows, cols);
     } else {
         *cols = ws.ws_col;
-        *rows = ws.ws_col;
+        *rows = ws.ws_row;
+        printf("rows: %d, cols: %d\r\n", *rows, *cols);
+        editorReadKey();
+
+
         return 0;
     }
 }
@@ -136,7 +142,7 @@ struct abuf {
     int len;
 };
 
-#define ABUF_INIT {NULL, 0}
+#define ABUF_INIT { NULL, 0 }
 
 void abAppend(struct abuf *ab, const char *s, int len) {
     char *new = realloc(ab->b, ab->len + len);
@@ -157,8 +163,33 @@ void abFree(struct abuf *ab) {
 /*** output ***/
 void editorDrawRows(struct abuf *ab) {
     int y;
-    for (y = 0; y < E.screenrows; y++) {
-        abAppend(ab, "~", 1); 
+    int numrows = E.screenrows;
+    for (y = 0; y < numrows; y++) {
+        // Display welcome message
+        if (y == numrows / 3) {
+            char welcome[80];
+            int welcomelen = snprintf(welcome, sizeof(welcome), "lb editor -- v%s", LB_VERSION);
+            if (welcomelen > E.screencols) {
+                welcomelen = E.screencols;
+            }
+            
+            int padding = (E.screencols - welcomelen) / 2;
+            if (padding) {
+                abAppend(ab, "~", 1);
+                padding--;
+            }
+
+            while (padding--) {
+                abAppend(ab, " ", 1);
+            }
+
+            abAppend(ab, welcome, welcomelen);
+        } else {
+            abAppend(ab, "~", 1); 
+        }
+
+        // Clear to end of line
+        abAppend(ab, "\x1b[K", 3);
         // Don't scroll on last line
         if (y < E.screenrows - 1) {
             abAppend(ab, "\r\n", 2);
@@ -168,13 +199,20 @@ void editorDrawRows(struct abuf *ab) {
 
 void editorRefreshScreen() {
     struct abuf ab = ABUF_INIT;
-    // Escape command to clear the whole screen
-    abAppend(&ab, "x1b[2J", 4);
+    
+    // Hide cursor
+    abAppend(&ab, "\x1b[?25l", 6);
     // Reposition cursor
     abAppend(&ab, "\x1b[H", 3);
 
     editorDrawRows(&ab);
-    abAppend(&ab, "\x1b[H", 3);
+
+    char buf[32];
+    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cy + 1, E.cx + 1);
+    abAppend(&ab, buf, strlen(buf));
+
+    // Show cursor
+    abAppend(&ab, "\x1b[?25h", 6);
 
     write(STDOUT_FILENO, ab.b, ab.len);
 
@@ -202,6 +240,9 @@ void editorProcessKeypresses() {
 
 /*** init ***/
 void initEditor() {
+    E.cx = 0;
+    E.cy = 0;
+
     if (getWindowSize(&E.screenrows, &E.screencols) == -1) {
         die("initEditor::getWindowSize");
     }
