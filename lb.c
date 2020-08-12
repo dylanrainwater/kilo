@@ -41,6 +41,7 @@ struct editorConfig {
     int cursor_x, cursor_y;
     int row_offset;
     int screen_rows;
+    int col_offset;
     int screen_cols;
     int num_rows;
     erow *rows;
@@ -237,11 +238,9 @@ void openEditor(char *filename) {
     ssize_t line_len = 0;
     while((line_len = getline(&line, &line_cap, fp)) != -1) {
         // Strip off newline or carriage returns
-        while (line_len > 0 && (line[line_len - 1] == '\n' || line[line_len - 1] == '\r')) {
-            line_len--;
-        }
+        while (line_len > 0 && (line[line_len - 1] == '\n' || line[line_len - 1] == '\r')) line_len--;
 
-        editorAppendRow(line, line_len);
+        editorAppendRow(line, line_len + 1);
     }
 
     free(line);
@@ -278,6 +277,7 @@ void abFree(struct abuf *ab) {
 /*** output ***/
 
 void editorScroll() {
+    /*** Vertical Scrolling ***/
     // Scroll above window if necessary
     if (E.cursor_y < E.row_offset) {
         E.row_offset = E.cursor_y;
@@ -287,6 +287,16 @@ void editorScroll() {
     if (E.cursor_y >= E.row_offset + E.screen_rows) {
         E.row_offset = E.cursor_y - E.screen_rows + 1;
     }
+
+    /*** Horizontal Scrolling ***/
+    if (E.cursor_x < E.col_offset) {
+        E.col_offset = E.cursor_x;
+    }
+
+    if (E.cursor_x >= E.col_offset + E.screen_cols) {
+        E.col_offset = E.cursor_x + E.screen_cols + 1;
+    }
+
 }
 
 /*
@@ -323,11 +333,16 @@ void editorDrawRows(struct abuf *ab) {
                 abAppend(ab, "~", 1); 
             }
         } else {
-            int len = E.rows[file_row].length;
+            int len = E.rows[file_row].length - E.col_offset;
+            
+            if (len < 0) {
+                len = 0;
+            }
+
             if (len > E.screen_cols) {
                 len = E.screen_cols;
             }
-            abAppend(ab, E.rows[file_row].chars, len);
+            abAppend(ab, &E.rows[file_row].chars[E.col_offset], len);
         }
         // Clear to end of line
         abAppend(ab, "\x1b[K", 3);
@@ -351,7 +366,7 @@ void editorRefreshScreen() {
     editorDrawRows(&ab);
 
     char buf[32];
-    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cursor_y - E.row_offset + 1, E.cursor_x + 1);
+    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", (E.cursor_y - E.row_offset) + 1, (E.cursor_x - E.col_offset) + 1);
     abAppend(&ab, buf, strlen(buf));
 
     // Show cursor
@@ -364,15 +379,23 @@ void editorRefreshScreen() {
 
 /*** input ***/
 void editorMoveCursor(int key) {
+    erow *row = (E.cursor_y >= E.num_rows) ? NULL : &E.rows[E.cursor_y];
+
     switch (key) {
         case ARROW_LEFT:
             if (E.cursor_x != 0) {
                 E.cursor_x--;
+            } else if (E.cursor_y > 0) {
+                E.cursor_y--;
+                E.cursor_x = E.rows[E.cursor_y].length;
             }
             break;
         case ARROW_RIGHT:
-            if (E.cursor_x != E.screen_cols - 1) {
+            if (row && E.cursor_x < row->length) {
                 E.cursor_x++;
+            } else if (row && E.cursor_x == row->length) {
+                E.cursor_x = 0;
+                E.cursor_y++;
             }
             break;
         case ARROW_UP:
@@ -385,6 +408,14 @@ void editorMoveCursor(int key) {
                 E.cursor_y++;
             }
             break;
+    }
+
+    // Account for row lengths being different
+    row = (E.cursor_y >= E.num_rows) ? NULL : &E.rows[E.cursor_y];
+
+    int row_len = row ? row->length : 0;
+    if (E.cursor_x > row_len) {
+        E.cursor_x = row_len;
     }
 }
 
@@ -434,6 +465,7 @@ void initEditor() {
     E.num_rows = 0;
     E.rows = NULL;
     E.row_offset = 0;
+    E.col_offset = 0;
 
     if (getWindowSize(&E.screen_rows, &E.screen_cols) == -1) {
         die("initEditor::getWindowSize");
