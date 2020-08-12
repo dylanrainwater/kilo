@@ -1,10 +1,17 @@
 /*** includes ***/
+
+// Feature test macros to make a little more portable
+#define _DEFAULT_SOURCE
+#define _BSD_SOURCE
+#define _GNU_SOURCE
+
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/types.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -25,11 +32,17 @@ enum editorKey {
 };
 
 /*** data ***/
+typedef struct editor_row {
+    int length;
+    char *chars;
+} erow;
+
 struct editorConfig {
     int cursor_x, cursor_y;
     int screen_rows;
     int screen_cols;
     int num_rows;
+    erow *rows;
     struct termios orig_termios;
 };
 
@@ -196,9 +209,48 @@ int getWindowSize(int *rows, int *cols) {
     }
 }
 
-/*** append buffer ***/
-// dynamic, append-only string
+/*** row operations ***/
 
+void editorAppendRow(char *s, size_t len) {
+    E.rows = realloc(E.rows, sizeof(erow) * (E.num_rows + 1));
+
+    int r = E.num_rows;
+    E.rows[r].length = len;
+    E.rows[r].chars = malloc(len + 1);
+    memcpy(E.rows[r].chars, s, len);
+    E.rows[r].chars[len - 1] = '\0';
+
+    E.num_rows++;
+}
+
+/*** file I/O ***/
+
+void openEditor(char *filename) {
+    FILE *fp  = fopen(filename, "r");
+    if (!fp) {
+        die("openEditor::fopen");
+    }
+
+    char *line = NULL;
+    size_t line_cap = 0;
+    ssize_t line_len = 0;
+    while((line_len = getline(&line, &line_cap, fp)) != -1) {
+        // Strip off newline or carriage returns
+        while (line_len > 0 && (line[line_len - 1] == '\n' || line[line_len - 1] == '\r')) {
+            line_len--;
+        }
+
+        editorAppendRow(line, line_len);
+    }
+
+    free(line);
+    fclose(fp);
+}
+
+
+/*** append buffer ***/
+
+// dynamic, append-only string
 struct abuf {
     char *b;
     int len;
@@ -223,37 +275,48 @@ void abFree(struct abuf *ab) {
 }
 
 /*** output ***/
+
+/*
+ * Works by appending message to ab using calls to abAppend();
+ */
 void editorDrawRows(struct abuf *ab) {
     int y;
-    int numrows = E.screenrows;
-    for (y = 0; y < numrows; y++) {
-        // Display welcome message
-        if (y == numrows / 3) {
-            char welcome[80];
-            int welcomelen = snprintf(welcome, sizeof(welcome), "lb editor -- v%s", LB_VERSION);
-            if (welcomelen > E.screencols) {
-                welcomelen = E.screencols;
-            }
-            
-            int padding = (E.screencols - welcomelen) / 2;
-            if (padding) {
-                abAppend(ab, "~", 1);
-                padding--;
-            }
+    int screen_rows = E.screen_rows;
+    for (y = 0; y < screen_rows; y++) {
+        if (y >= E.num_rows) {
+            // Display welcome message
+            if (E.num_rows == 0 && y == screen_rows / 3) {
+                char welcome[80];
+                int welcomelen = snprintf(welcome, sizeof(welcome), "lb editor -- v%s", LB_VERSION);
+                if (welcomelen > E.screen_cols) {
+                    welcomelen = E.screen_cols;
+                }
+                
+                int padding = (E.screen_cols - welcomelen) / 2;
+                if (padding) {
+                    abAppend(ab, "~", 1);
+                    padding--;
+                }
 
-            while (padding--) {
-                abAppend(ab, " ", 1);
-            }
+                while (padding--) {
+                    abAppend(ab, " ", 1);
+                }
 
-            abAppend(ab, welcome, welcomelen);
+                abAppend(ab, welcome, welcomelen);
+            } else {
+                abAppend(ab, "~", 1); 
+            }
         } else {
-            abAppend(ab, "~", 1); 
+            int len = E.rows[y].length;
+            if (len > E.screen_cols) {
+                len = E.screen_cols;
+            }
+            abAppend(ab, E.rows[y].chars, len);
         }
-
         // Clear to end of line
         abAppend(ab, "\x1b[K", 3);
         // Don't scroll on last line
-        if (y < E.screenrows - 1) {
+        if (y < E.screen_rows - 1) {
             abAppend(ab, "\r\n", 2);
         }
     }
@@ -290,7 +353,7 @@ void editorMoveCursor(int key) {
             }
             break;
         case ARROW_RIGHT:
-            if (E.cursor_x != E.screencols - 1) {
+            if (E.cursor_x != E.screen_cols - 1) {
                 E.cursor_x++;
             }
             break;
@@ -300,7 +363,7 @@ void editorMoveCursor(int key) {
             }
             break;
         case ARROW_DOWN:
-            if (E.cursor_y != E.screenrows - 1) {
+            if (E.cursor_y != E.screen_rows - 1) {
                 E.cursor_y++;
             }
             break;
@@ -322,7 +385,7 @@ void editorProcessKeypresses() {
         case PAGE_UP:
         case PAGE_DOWN:
             {
-                int times = E.screenrows;
+                int times = E.screen_rows;
                 while (times--) {
                     editorMoveCursor(c == PAGE_UP ? ARROW_UP : ARROW_DOWN);
                 }
@@ -333,7 +396,7 @@ void editorProcessKeypresses() {
             E.cursor_x = 0;
             break;
         case END_KEY:
-            E.cursor_x = E.screencols - 1;
+            E.cursor_x = E.screen_cols - 1;
             break;
 
         case ARROW_UP:
@@ -350,15 +413,21 @@ void editorProcessKeypresses() {
 void initEditor() {
     E.cursor_x = 0;
     E.cursor_y = 0;
+    E.num_rows = 0;
+    E.rows = NULL;
 
-    if (getWindowSize(&E.screenrows, &E.screencols) == -1) {
+    if (getWindowSize(&E.screen_rows, &E.screen_cols) == -1) {
         die("initEditor::getWindowSize");
     }
 }
 
-int main() {
+int main(int argc, char *argv[]) {
     enableRawMode();
     initEditor();
+
+    if (argc >= 2) {
+        openEditor(argv[1]);
+    }
 
     // Input loop
     while (1) {
