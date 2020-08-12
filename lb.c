@@ -26,9 +26,10 @@ enum editorKey {
 
 /*** data ***/
 struct editorConfig {
-    int cx, cy;
-    int screenrows;
-    int screencols;
+    int cursor_x, cursor_y;
+    int screen_rows;
+    int screen_cols;
+    int num_rows;
     struct termios orig_termios;
 };
 
@@ -269,7 +270,7 @@ void editorRefreshScreen() {
     editorDrawRows(&ab);
 
     char buf[32];
-    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cy + 1, E.cx + 1);
+    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cursor_y + 1, E.cursor_x + 1);
     abAppend(&ab, buf, strlen(buf));
 
     // Show cursor
@@ -284,23 +285,23 @@ void editorRefreshScreen() {
 void editorMoveCursor(int key) {
     switch (key) {
         case ARROW_LEFT:
-            if (E.cx != 0) {
-                E.cx--;
+            if (E.cursor_x != 0) {
+                E.cursor_x--;
             }
             break;
         case ARROW_RIGHT:
-            if (E.cx != E.screencols - 1) {
-                E.cx++;
+            if (E.cursor_x != E.screencols - 1) {
+                E.cursor_x++;
             }
             break;
         case ARROW_UP:
-            if (E.cy != 0) {
-                E.cy--;
+            if (E.cursor_y != 0) {
+                E.cursor_y--;
             }
             break;
         case ARROW_DOWN:
-            if (E.cy != E.screenrows - 1) {
-                E.cy++;
+            if (E.cursor_y != E.screenrows - 1) {
+                E.cursor_y++;
             }
             break;
     }
@@ -329,10 +330,10 @@ void editorProcessKeypresses() {
             break;
 
         case HOME_KEY:
-            E.cx = 0;
+            E.cursor_x = 0;
             break;
         case END_KEY:
-            E.cx = E.screencols - 1;
+            E.cursor_x = E.screencols - 1;
             break;
 
         case ARROW_UP:
@@ -347,8 +348,8 @@ void editorProcessKeypresses() {
 
 /*** init ***/
 void initEditor() {
-    E.cx = 0;
-    E.cy = 0;
+    E.cursor_x = 0;
+    E.cursor_y = 0;
 
     if (getWindowSize(&E.screenrows, &E.screencols) == -1) {
         die("initEditor::getWindowSize");
