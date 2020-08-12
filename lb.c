@@ -39,6 +39,7 @@ typedef struct editor_row {
 
 struct editorConfig {
     int cursor_x, cursor_y;
+    int row_offset;
     int screen_rows;
     int screen_cols;
     int num_rows;
@@ -276,14 +277,29 @@ void abFree(struct abuf *ab) {
 
 /*** output ***/
 
+void editorScroll() {
+    // Scroll above window if necessary
+    if (E.cursor_y < E.row_offset) {
+        E.row_offset = E.cursor_y;
+    }
+
+    // Scroll to bottom if necessary
+    if (E.cursor_y >= E.row_offset + E.screen_rows) {
+        E.row_offset = E.cursor_y - E.screen_rows + 1;
+    }
+}
+
 /*
  * Works by appending message to ab using calls to abAppend();
  */
 void editorDrawRows(struct abuf *ab) {
     int y;
     int screen_rows = E.screen_rows;
+
     for (y = 0; y < screen_rows; y++) {
-        if (y >= E.num_rows) {
+        int file_row = y + E.row_offset;
+        
+        if (file_row >= E.num_rows) {
             // Display welcome message
             if (E.num_rows == 0 && y == screen_rows / 3) {
                 char welcome[80];
@@ -307,11 +323,11 @@ void editorDrawRows(struct abuf *ab) {
                 abAppend(ab, "~", 1); 
             }
         } else {
-            int len = E.rows[y].length;
+            int len = E.rows[file_row].length;
             if (len > E.screen_cols) {
                 len = E.screen_cols;
             }
-            abAppend(ab, E.rows[y].chars, len);
+            abAppend(ab, E.rows[file_row].chars, len);
         }
         // Clear to end of line
         abAppend(ab, "\x1b[K", 3);
@@ -323,6 +339,8 @@ void editorDrawRows(struct abuf *ab) {
 }
 
 void editorRefreshScreen() {
+    editorScroll();
+
     struct abuf ab = ABUF_INIT;
     
     // Hide cursor
@@ -333,7 +351,7 @@ void editorRefreshScreen() {
     editorDrawRows(&ab);
 
     char buf[32];
-    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cursor_y + 1, E.cursor_x + 1);
+    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", E.cursor_y - E.row_offset + 1, E.cursor_x + 1);
     abAppend(&ab, buf, strlen(buf));
 
     // Show cursor
@@ -363,7 +381,7 @@ void editorMoveCursor(int key) {
             }
             break;
         case ARROW_DOWN:
-            if (E.cursor_y != E.screen_rows - 1) {
+            if (E.cursor_y < E.num_rows) {
                 E.cursor_y++;
             }
             break;
@@ -415,6 +433,7 @@ void initEditor() {
     E.cursor_y = 0;
     E.num_rows = 0;
     E.rows = NULL;
+    E.row_offset = 0;
 
     if (getWindowSize(&E.screen_rows, &E.screen_cols) == -1) {
         die("initEditor::getWindowSize");
