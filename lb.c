@@ -404,11 +404,20 @@ void editorDrawRows(struct abuf *ab) {
         }
         // Clear to end of line
         abAppend(ab, "\x1b[K", 3);
-        // Don't scroll on last line
-        if (y < E.screen_rows - 1) {
-            abAppend(ab, "\r\n", 2);
-        }
+        abAppend(ab, "\r\n", 2);
     }
+}
+
+void editorDrawStatusBar(struct abuf *ab) {
+    abAppend(ab, "\x1b[7m", 4); // Invert colors
+
+    int len = 0;
+    while (len < E.screen_cols) {
+        abAppend(ab, " ", 1);
+        len++;
+    }
+
+    abAppend(ab, "\x1b[m", 3); // Re-invert colors
 }
 
 void editorRefreshScreen() {
@@ -422,6 +431,7 @@ void editorRefreshScreen() {
     abAppend(&ab, "\x1b[H", 3);
 
     editorDrawRows(&ab);
+    editorDrawStatusBar(&ab);
 
     char buf[32];
     snprintf(buf, sizeof(buf), "\x1b[%d;%dH", (E.cursor_y - E.row_offset) + 1, (E.render_x - E.col_offset) + 1);
@@ -541,6 +551,8 @@ void initEditor() {
     if (getWindowSize(&E.screen_rows, &E.screen_cols) == -1) {
         die("initEditor::getWindowSize");
     }
+
+    E.screen_rows -= 1; // make room for status bar
 }
 
 int main(int argc, char *argv[]) {
