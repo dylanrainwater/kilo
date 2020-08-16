@@ -42,6 +42,7 @@ typedef struct editor_row {
 
 struct editorConfig {
     int cursor_x, cursor_y;
+    int render_x;
     int row_offset;
     int screen_rows;
     int col_offset;
@@ -216,6 +217,20 @@ int getWindowSize(int *rows, int *cols) {
 
 /*** row operations ***/
 
+int cursorXToRenderX(erow *row, int cx) {
+    int rx = 0;
+
+    int i;
+    for (i = 0; i < cx; i++) {
+        if (row->chars[i] == '\t') {
+            rx += (TAB_LENGTH - 1) - (rx % TAB_LENGTH);
+        }
+        rx++;
+    }
+
+    return rx;
+}
+
 void editorUpdateRow(erow *row) {
     int tabs = 0;
     int j;
@@ -315,6 +330,11 @@ void abFree(struct abuf *ab) {
 /*** output ***/
 
 void editorScroll() {
+    E.render_x = 0;
+    if (E.cursor_x < E.num_rows) {
+        E.render_x = cursorXToRenderX(&E.rows[E.cursor_y], E.cursor_x);
+    }
+
     /*** Vertical Scrolling ***/
     // Scroll above window if necessary
     if (E.cursor_y < E.row_offset) {
@@ -327,12 +347,12 @@ void editorScroll() {
     }
 
     /*** Horizontal Scrolling ***/
-    if (E.cursor_x < E.col_offset) {
-        E.col_offset = E.cursor_x;
+    if (E.render_x < E.col_offset) {
+        E.col_offset = E.render_x;
     }
 
-    if (E.cursor_x >= E.col_offset + E.screen_cols) {
-        E.col_offset = E.cursor_x + E.screen_cols + 1;
+    if (E.render_x >= E.col_offset + E.screen_cols) {
+        E.col_offset = E.render_x + E.screen_cols + 1;
     }
 
 }
@@ -404,7 +424,7 @@ void editorRefreshScreen() {
     editorDrawRows(&ab);
 
     char buf[32];
-    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", (E.cursor_y - E.row_offset) + 1, (E.cursor_x - E.col_offset) + 1);
+    snprintf(buf, sizeof(buf), "\x1b[%d;%dH", (E.cursor_y - E.row_offset) + 1, (E.render_x - E.col_offset) + 1);
     abAppend(&ab, buf, strlen(buf));
 
     // Show cursor
@@ -472,6 +492,16 @@ void editorProcessKeypresses() {
         case PAGE_UP:
         case PAGE_DOWN:
             {
+                if (c == PAGE_UP) {
+                    E.cursor_y = E.row_offset;
+                } else if (c == PAGE_DOWN) {
+                    E.cursor_y = E.row_offset + E.screen_rows + 1;
+
+                    if (E.cursor_y > E.num_rows) {
+                        E.cursor_y = E.num_rows;
+                    }
+                }
+
                 int times = E.screen_rows;
                 while (times--) {
                     editorMoveCursor(c == PAGE_UP ? ARROW_UP : ARROW_DOWN);
@@ -483,7 +513,9 @@ void editorProcessKeypresses() {
             E.cursor_x = 0;
             break;
         case END_KEY:
-            E.cursor_x = E.screen_cols - 1;
+            if (E.cursor_y < E.num_rows) {
+                E.cursor_x = E.rows[E.cursor_y].length;
+            }
             break;
 
         case ARROW_UP:
@@ -500,6 +532,7 @@ void editorProcessKeypresses() {
 void initEditor() {
     E.cursor_x = 0;
     E.cursor_y = 0;
+    E.render_x  = 0;
     E.num_rows = 0;
     E.rows = NULL;
     E.row_offset = 0;
