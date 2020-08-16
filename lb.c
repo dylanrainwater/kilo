@@ -8,11 +8,13 @@
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <termios.h>
+#include <time.h>
 #include <unistd.h>
 
 /*** defines ***/
@@ -42,6 +44,8 @@ typedef struct editor_row {
 
 struct statusbar {
     char *filename;
+    char msg[80];
+    time_t msg_time;
 };
 
 struct editorConfig {
@@ -440,7 +444,23 @@ void editorDrawStatusBar(struct abuf *ab) {
     }
 
     abAppend(ab, "\x1b[m", 3); // Re-invert colors
+    abAppend(ab, "\r\n", 2);
 }
+
+void editorDrawMessage(struct abuf *ab) {
+    int show_length = 5; // seconds
+
+    abAppend(ab, "\x1b[K", 3); // clear message bar
+
+    int msglen = strlen(E.status.msg);
+    if (msglen > E.screen_cols) {
+        msglen = E.screen_cols;
+    }
+    if (msglen && time(NULL) - E.status.msg_time < show_length) {
+        abAppend(ab, E.status.msg, msglen);
+    }
+}
+
 
 void editorRefreshScreen() {
     editorScroll();
@@ -454,6 +474,7 @@ void editorRefreshScreen() {
 
     editorDrawRows(&ab);
     editorDrawStatusBar(&ab);
+    editorDrawMessage(&ab);
 
     char buf[32];
     snprintf(buf, sizeof(buf), "\x1b[%d;%dH", (E.cursor_y - E.row_offset) + 1, (E.render_x - E.col_offset) + 1);
@@ -466,6 +487,17 @@ void editorRefreshScreen() {
 
     abFree(&ab);
 }
+
+void editorSetStatusMessage(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+
+    vsnprintf(E.status.msg, sizeof(E.status.msg), fmt, ap);
+
+    va_end(ap);
+    E.status.msg_time = time(NULL);
+}
+
 
 /*** input ***/
 void editorMoveCursor(int key) {
@@ -570,12 +602,14 @@ void initEditor() {
     E.row_offset = 0;
     E.col_offset = 0;
     E.status.filename = NULL;
+    E.status.msg[0] = '\0';
+    E.status.msg_time = 0;
 
     if (getWindowSize(&E.screen_rows, &E.screen_cols) == -1) {
         die("initEditor::getWindowSize");
     }
 
-    E.screen_rows -= 1; // make room for status bar
+    E.screen_rows -= 2; // make room for status bar
 }
 
 int main(int argc, char *argv[]) {
@@ -585,6 +619,8 @@ int main(int argc, char *argv[]) {
     if (argc >= 2) {
         openEditor(argv[1]);
     }
+
+    editorSetStatusMessage("HELP: Ctrl-Q to quit lb.");
 
     // Input loop
     while (1) {
