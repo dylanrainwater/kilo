@@ -40,6 +40,10 @@ typedef struct editor_row {
     char *render;
 } erow;
 
+struct statusbar {
+    char *filename;
+};
+
 struct editorConfig {
     int cursor_x, cursor_y;
     int render_x;
@@ -49,8 +53,10 @@ struct editorConfig {
     int screen_cols;
     int num_rows;
     erow *rows;
+    struct statusbar status;
     struct termios orig_termios;
 };
+
 
 struct editorConfig E;
 
@@ -281,6 +287,9 @@ void editorAppendRow(char *s, size_t len) {
 /*** file I/O ***/
 
 void openEditor(char *filename) {
+    free(E.status.filename);
+    E.status.filename = strdup(filename);
+
     FILE *fp  = fopen(filename, "r");
     if (!fp) {
         die("openEditor::fopen");
@@ -410,11 +419,24 @@ void editorDrawRows(struct abuf *ab) {
 
 void editorDrawStatusBar(struct abuf *ab) {
     abAppend(ab, "\x1b[7m", 4); // Invert colors
+    char status[80], rstatus[80];
+    int len = snprintf(status, sizeof(status), "# %.20s - %d lines", 
+                      E.status.filename ? E.status.filename : "[New File]", E.num_rows);
+    int rlen = snprintf(rstatus, sizeof(rstatus), "%d:%d %d ", E.cursor_y + 1, E.cursor_x + 1, E.num_rows);
+    if (len > E.screen_cols) {
+        len = E.screen_cols;
+    }
 
-    int len = 0;
+    abAppend(ab, status, len);
+
     while (len < E.screen_cols) {
-        abAppend(ab, " ", 1);
-        len++;
+        if (E.screen_cols - len == rlen) {
+            abAppend(ab, rstatus, rlen);
+            break;
+        } else {
+            abAppend(ab, " ", 1);
+            len++;
+        }
     }
 
     abAppend(ab, "\x1b[m", 3); // Re-invert colors
@@ -547,6 +569,7 @@ void initEditor() {
     E.rows = NULL;
     E.row_offset = 0;
     E.col_offset = 0;
+    E.status.filename = NULL;
 
     if (getWindowSize(&E.screen_rows, &E.screen_cols) == -1) {
         die("initEditor::getWindowSize");
