@@ -17,6 +17,7 @@
 
 /*** defines ***/
 #define LB_VERSION "0.0.1"
+#define TAB_LENGTH 4
 #define CTRL_KEY(k) ((k) & 0x1f) // 0x1f = 00011111
 
 enum editorKey {
@@ -217,7 +218,6 @@ int getWindowSize(int *rows, int *cols) {
 
 void editorUpdateRow(erow *row) {
     int tabs = 0;
-    int tab_size = 4;
     int j;
     for (j = 0; j < row->length; j++) {
         if (row->chars[j] == '\t') {
@@ -226,7 +226,7 @@ void editorUpdateRow(erow *row) {
     }
 
     free(row->render);
-    row->render = malloc(row->length + (tabs * (tab_size - 1)) + 1);
+    row->render = malloc(row->length + (tabs * (TAB_LENGTH - 1)) + 1);
 
     int rlength = 0;
     for (j = 0; j < row->length; j++) {
@@ -234,7 +234,7 @@ void editorUpdateRow(erow *row) {
         if (row->chars[j] == '\t') {
             row->render[rlength++] = ' ';
 
-            while (rlength % tab_size != 0) {
+            while (rlength % TAB_LENGTH != 0) {
                 row->render[rlength++] = ' ';
             }
         } else {
