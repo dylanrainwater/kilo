@@ -34,7 +34,9 @@ enum editorKey {
 /*** data ***/
 typedef struct editor_row {
     int length;
+    int render_length;
     char *chars;
+    char *render;
 } erow;
 
 struct editorConfig {
@@ -213,14 +215,34 @@ int getWindowSize(int *rows, int *cols) {
 
 /*** row operations ***/
 
+void editorUpdateRow(erow *row) {
+    free(row->render);
+    row->render = malloc(row->length + 1);
+
+    int j;
+    int rlength = 0;
+
+    for (j = 0; j < row->length; j++) {
+        row->render[rlength++] = row->chars[j];
+    }
+
+    row->render[rlength] = '\0';
+    row->render_length = rlength;
+}
+
 void editorAppendRow(char *s, size_t len) {
     E.rows = realloc(E.rows, sizeof(erow) * (E.num_rows + 1));
 
     int r = E.num_rows;
+
     E.rows[r].length = len;
     E.rows[r].chars = malloc(len + 1);
     memcpy(E.rows[r].chars, s, len);
     E.rows[r].chars[len - 1] = '\0';
+
+    E.rows[r].render_length = 0;
+    E.rows[r].render = NULL;
+    editorUpdateRow(&E.rows[r]);
 
     E.num_rows++;
 }
@@ -333,7 +355,7 @@ void editorDrawRows(struct abuf *ab) {
                 abAppend(ab, "~", 1); 
             }
         } else {
-            int len = E.rows[file_row].length - E.col_offset;
+            int len = E.rows[file_row].render_length - E.col_offset;
             
             if (len < 0) {
                 len = 0;
@@ -342,7 +364,7 @@ void editorDrawRows(struct abuf *ab) {
             if (len > E.screen_cols) {
                 len = E.screen_cols;
             }
-            abAppend(ab, &E.rows[file_row].chars[E.col_offset], len);
+            abAppend(ab, &E.rows[file_row].render[E.col_offset], len);
         }
         // Clear to end of line
         abAppend(ab, "\x1b[K", 3);
