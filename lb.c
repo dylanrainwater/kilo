@@ -344,7 +344,7 @@ void abFree(struct abuf *ab) {
 
 void editorScroll() {
     E.render_x = 0;
-    if (E.cursor_x < E.num_rows) {
+    if (E.cursor_y < E.num_rows) {
         E.render_x = cursorXToRenderX(&E.rows[E.cursor_y], E.cursor_x);
     }
 
