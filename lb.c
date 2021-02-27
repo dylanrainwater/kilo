@@ -7,6 +7,7 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -23,6 +24,7 @@
 #define CTRL_KEY(k) ((k) & 0x1f) // 0x1f = 00011111
 
 enum editorKey {
+    BACK_SPACE = 127,
     ARROW_LEFT = 1000,
     ARROW_RIGHT,
     ARROW_UP,
@@ -63,6 +65,10 @@ struct editorConfig {
 
 
 struct editorConfig E;
+
+/*** prototypes ***/
+
+void editorSetStatusMessage(const char *fmt, ...);
 
 /*** terminal ***/
 void die(const char *s) {
@@ -288,7 +294,52 @@ void editorAppendRow(char *s, size_t len) {
     E.num_rows++;
 }
 
+void editorInsertCharAt(erow *row, int at, int c) {
+    if (at < 0 || at > row->length) {
+        at = row->length;
+    }
+
+    row->chars = realloc(row->chars, row->length + 2);
+    memmove(&row->chars[at + 1], &row->chars[at], row->length - at + 1);
+    row->length++;
+    row->chars[at] = c;
+    editorUpdateRow(row);
+}
+
+/*** editor operations ***/
+
+void editorInsertChar(char c) {
+    if (E.cursor_y == E.num_rows) {
+        editorAppendRow("", 0);        
+    }
+    editorInsertCharAt(&E.rows[E.cursor_y], E.cursor_x, c);
+    E.cursor_x++;
+}
+
+
 /*** file I/O ***/
+
+char *editorRowsToString(int *buffer_length) {
+    int total_length = 0;
+    
+    int j;
+    for (j = 0; j < E.num_rows; j++) {
+        total_length += E.rows[j].length + 1;
+    }
+    
+    *buffer_length = total_length;
+
+    char *buffer = malloc(total_length);
+    char *p = buffer;
+    for (j = 0; j < E.num_rows; j++) {
+        memcpy(p, E.rows[j].chars, E.rows[j].length);
+        p += E.rows[j].length;
+        *p = '\n';
+        p++;
+    } 
+    
+    return buffer;
+}
 
 void openEditor(char *filename) {
     free(E.status.filename);
@@ -311,6 +362,30 @@ void openEditor(char *filename) {
 
     free(line);
     fclose(fp);
+}
+
+void saveEditor() {
+    if (E.status.filename == NULL) {
+        return;
+    }
+
+    int len;
+    char *buf = editorRowsToString(&len);
+    
+    int fd = open(E.status.filename, O_RDWR | O_CREAT, 0644);
+    if (fd != -1) {
+        if (ftruncate(fd, len) != -1) {
+            if (write(fd, buf, len) == len) {
+                close(fd);
+                free(buf);
+                editorSetStatusMessage("%d bytes successfully written to disk.", len);
+                return;
+            }
+        }
+        close(fd);
+    }
+    free(buf);
+    editorSetStatusMessage("ERROR: Can't save! I/O error: %s", strerror(errno));
 }
 
 
@@ -545,12 +620,19 @@ void editorProcessKeypresses() {
     int c = editorReadKey();
 
     switch (c) {
+        case '\r':
+            /* TODO */
+            break;
         case CTRL_KEY('q'):
             // Escape command to clear the whole screen
             write(STDOUT_FILENO, "\x1b[2J", 4);
             // Reposition cursor
             write(STDOUT_FILENO, "\x1b[H", 3);
             exit(0);
+            break;
+
+        case CTRL_KEY('s'):
+            saveEditor();
             break;
 
         case PAGE_UP:
@@ -581,12 +663,26 @@ void editorProcessKeypresses() {
                 E.cursor_x = E.rows[E.cursor_y].length;
             }
             break;
+        
+        case BACK_SPACE:
+        case CTRL_KEY('h'):
+        case DEL_KEY:
+            /* TODO */
+            break;
 
         case ARROW_UP:
         case ARROW_LEFT:
         case ARROW_DOWN:
         case ARROW_RIGHT:
             editorMoveCursor(c);
+            break;
+
+        case CTRL_KEY('l'):
+        case '\x1b':
+            break;
+    
+        default:
+            editorInsertChar(c);
             break;
     }
 }
@@ -620,7 +716,7 @@ int main(int argc, char *argv[]) {
         openEditor(argv[1]);
     }
 
-    editorSetStatusMessage("HELP: Ctrl-Q to quit lb.");
+    editorSetStatusMessage("lb help: Ctrl-S to save | Ctrl-Q to quit");
 
     // Input loop
     while (1) {
